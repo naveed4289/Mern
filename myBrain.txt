@@ -1,0 +1,392 @@
+-----------------------------------------------------------------------------------
+=>>>STEP 1:
+
+1:Make a backend Folder
+2:Install Packages
+  (npm init -y
+  npm install express mongoose bcryptjs jsonwebtoken zod
+  npm install dotenv
+  npm install nodemon --save-dev)
+3:Make a main file server.js (and write Hello World program)
+4:Make a Dotenv file and paste a link from mongodb Atlas and add a project name in link
+5:Make a db.js File in utlis folder and write a code for connection of Database(
+after create a connection code function call on server.js file)
+-------------------------Code---------------------------
+1:==>.env
+ {
+  MONGODB_URI="mongodb+srv://naveed:Rn755261@cluster0.bbygo.mongodb.net/practice_mern?retryWrites=true&w=majority&appName=Cluster0"
+  }
+2:==>db.js
+{
+  const mongoose=require("mongoose")
+  const URI=process.env.MONGODB_URI;
+
+  const connectDb=async()=>{
+    try {
+        await mongoose.connect(URI);
+        console.log("Connection Successfully")
+    } catch (error) {
+        console.error("Database Connection Failed");
+        process.exit(0);
+    }
+}
+  module.exports=connectDb;
+}
+3:==>Server.js
+{
+  require("dotenv").config();
+  const express = require('express');
+  const connectDb = require("./utils/db");
+  const app = express()
+
+  app.get('/', (req, res) => {
+     res.send('Hello World!')
+  })
+
+  const PORT = 5000;
+  connectDb().then(()=>{
+    app.listen(PORT, () => {
+      console.log(`app run on ${PORT} port `)
+    })
+})
+}
+-----------------------------------------------------------------------------------
+
+------------------------------STEP:2----------------------------
+
+///ye sab krny k baad simple postman m check kro aur atlas per k hamra data databse m ja rha hai y nhi as k liye
+
+1: make auth-router file  
+------------code-----------------
+const express=require("express")
+const router=express.Router();
+const authController=require("../controllers/auth-controller")
+//-----Home
+router.route("/").get(authController.home);
+//------:1:--Registeration
+router.route("/register").post(authController.Register);
+
+//------:2:--Login
+router.route("/login").post(authController.Login);
+module.exports=router;
+
+
+2:then make auth-controller file aur as m register wala code dekho aur wo require krna hai models wali wali jis m schema hai
+
+--------------------------code-----------------------
+
+//------:1:Registration Controller
+const Register = async (req, res) => {
+    try {
+      const{username,email,password,phone}=req.body;
+      const UserExist=await User.findOne({email});
+      if(UserExist){
+        return res.status(200).json({message:"email already exist"})
+      }
+      const UserCreated=await User.create({username,email,password,phone});
+      res.status(200).json({ message: UserCreated  });
+    } catch (error) {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  };
+
+
+3: make a user-model file and write
+
+-----------------code----------------------
+const mongoose=require("mongoose")
+
+//---User Schema
+
+const userSchema=new mongoose.Schema({
+    username:{
+        type:String,
+        required:true,
+    },
+    email:{
+        type:String,
+        required:true,
+    },
+    phone:{
+        type:String,
+        required:true,
+    },
+    password:{
+        type:String,
+        required:true,
+    },
+    isAdmin:{
+        type:Boolean,
+        default:false,
+    },
+})
+
+const User=new mongoose.model("User",userSchema)
+module.exports=User;
+
+4:update code in server.js
+
+--------------------code------------------------
+require("dotenv").config();
+const express = require('express');
+const connectDb = require("./utils/db");
+const authRoute=require("./routers/auth-router")
+const app = express()
+
+app.use(express.json());
+app.use("/api/auth", authRoute)
+
+
+const PORT = 5000;
+connectDb().then(()=>{
+    app.listen(PORT, () => {
+      console.log(`app run on ${PORT} port `)
+    })
+})
+-----------------------------------------------------------------------------------
+
+
+-----------------------------STEP:3-----------------------------
+
+1:password ko hash m store krny ke liya   model m schema bny se phly function 
+                        "firslty import bcrypt"
+
+--------------------------------code-------------------------------
+
+userSchema.pre("save",async function(next){
+    const user=this;
+    if(!user.isModified){
+        next();
+    }
+    try {
+        const saltRound=await bcrypt.genSalt(10);
+        const hashPassword=await bcrypt.hash(user.password,saltRound)
+        user.password=hashPassword;
+    } catch (error) {
+        next(error);
+    }
+})
+
+2:JWT Token k function bhi issi model m bnana hai as k baad controllers m rejister waly m bhi add krna hai
+----------------------firstly import jwt
+---------------------------code-------------------------------------
+
+userSchema.methods.generateToken=async function () {
+    try {
+        return jwt.sign({
+            userId:this._id.toString(),
+            email:this.email,
+            isAdmin:this.IsAdmin,
+        },
+        process.env.JWT_SECRET_KEY,{
+            expiresIn:"30d",
+        } )      
+    } catch (error) {
+        console.error(error)
+    }
+}
+
+--------------------controller------------------
+
+//------:1:Registration Controller
+const Register = async (req, res) => {
+    try {
+      const{username,email,password,phone}=req.body;
+      const UserExist=await User.findOne({email});
+      if(UserExist){
+        return res.status(200).json({message:"email already exist"})
+      }
+      const UserCreated=await User.create({username,email,password,phone});
+      res.status(200).json({
+        // message: "registration Successfully",
+        message: UserCreated,
+        token:await UserCreated.generateToken(),
+        userId: UserCreated._id.toString()
+        });
+    } catch (error) {
+      res.status(500).json({ message: "Internal server error" });
+    }
+  };
+-----------------------------------------------------------------------------------
+
+----------------------------------STEP:4-------------------------------
+1:Build a complete Login Procedure:
+
+-----------------controler----------------
+//------:2:Login Controller
+const Login= async(req,res)=>{
+    try {
+        const{email,password}=req.body;
+        const UserExist=await User.findOne({email});
+        if(!UserExist){
+          return res.status(200).json({message:"Invalid Credential"})
+        }
+       const user=await UserExist.comparePassword(password);
+       if(user){
+           res.status(200).json({
+             message: "login Succesfully",
+             token:await UserExist.generateToken(),
+             userId: UserExist._id.toString()
+             });
+       }else{
+        res.status(500).json({ message: "Invalid email or password" });
+       }
+      } catch (error) {
+        res.status(500).json({ message: "Internal server error" });
+      }
+}
+
+-----------------------model-----------------------------
+
+//For Login Password Comapre
+
+userSchema.methods.comparePassword=async function(password){
+    return bcrypt.compare(password,this.password);
+}
+
+-----------------------------------------------------------------------------------
+
+
+--------------------------------STEP:5--------------------------------------------
+1:create Zod validtors means like error yani firld m password 6 se ziyada ho name 3 se ziyada  ho make folder validators and then make file auth-validators
+
+---------------------------------code-----------------------------------------
+const {z}=require("zod");
+
+const signupSchema=z.object({
+    username: z
+    .string({required_error:"Name is required"})
+    .trim()
+    .min(3,{message:"name must be atleast 3 characters"})
+    .max(255,{message:"name must not be more than 255 character"}),
+
+    email:z
+    .string({required_error:"email is required"})
+    .trim()
+    .email({message:"Invalid email address"})
+    .min(3,{message:"email must be atleast 3 characters"})
+    .max(255,{message:"email must not be more than 255 character"}),
+
+    phone:z
+    .string({required_error:"phone is required"})
+    .trim()
+    .min(10,{message:"phone must be atleast 10 characters"})
+    .max(11,{message:"phone must not be more than 11 character"}),
+
+    password:z
+    .string({required_error:"password is required"})
+    .min(6,{message:"password must be atleast 6 characters"})
+    .max(1024,{message:"password must not be more than 1024 character"}),
+})
+
+const loginSchema=z.object({
+
+
+    email:z
+    .string({required_error:"email is required"})
+    .trim()
+    .email({message:"Invalid email address"})
+    .min(3,{message:"email must be atleast 3 characters"})
+    .max(255,{message:"email must not be more than 255 character"}),
+
+  
+    password:z
+    .string({required_error:"password is required"})
+    .min(6,{message:"password must be atleast 6 characters"})
+    .max(1024,{message:"password must not be more than 1024 character"}),
+})
+module.exports={signupSchema,loginSchema};
+
+------------------------------validate middleware -----------------------
+2: Means y k kya error hai ye middleware show krwata hai zod aur mongosse ko dekh kr 
+--------------------------------code-------------------------------------------
+
+const{Schema}=require("mongoose");
+
+const validate = (Schema) => async (req, res, next) => {
+    try {
+        const parseBody = await Schema.parseAsync(req.body);
+        req.body = parseBody;
+        return next();
+    } catch (err) {
+        const status = 422;
+        // const message = err.errors ? err.errors[0].message : "Validation Error";
+        const message="Fill the input Properly"
+        const extraDetails = err.issues ? err.issues.map((curElem) => curElem.message) : [];
+
+        // Instead of using next, directly sending the error response
+        res.status(status).json({
+            status,
+            message,
+            extraDetails
+        });
+    }
+};
+
+module.exports=validate;
+
+-----------------------------------------------------------------------------------
+
+
+---------------------------------STEP:6--------------------------------------------
+
+1:as k baad hm ek contact k liye bhi cretae kry gain taky agr koi contact krna chaie tu wo easily kr sky ak k router controller aur model file bnai hai
+------>model--------------------------code------------------------------------
+
+const {Schema,model}=require("mongoose")
+
+const contactSchema=new Schema({
+    username:{
+        type:String,
+        required:true,
+    },
+    email:{
+        type:String,
+        required:true,
+    },
+    message:{
+        type:String,
+        required:true,
+    },
+})
+const Contact=new model("Contact",contactSchema);
+module.exports=Contact
+
+
+-------->controller-----------------code-----------------------------------------
+const express=require("express")
+const Contact=require("../models/contact-model")
+
+const contactForm=async(req,res)=>{
+
+    try {
+        const response=req.body;
+        await Contact.create(response);
+        return res.status(201).json({message:"message send successfully"})
+        
+    } catch (error) {
+        return res.status(201).json({message:"message not delivered"})
+    }
+    
+}
+
+module.exports=contactForm;
+
+
+
+---------->router-------------------------code------------------------------------
+const express=require("express")
+const router=express.Router();
+const contactForm=require("../controllers/contact-controller")
+
+//contact router
+
+router.route("/contact").post(contactForm);
+
+module.exports=router;
+
+-----------------------------------------------------------------------------------
+
+
+------------------------------------STEP:7-----------------------------------------
+
